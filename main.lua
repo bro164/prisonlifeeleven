@@ -1,5 +1,5 @@
 -- =====================================================
---         NEVERLOSE STYLED PRISON LIFE SCRIPT (RAW)
+--    SOLARA OPTIMIZED NEVERLOSE PRISON LIFE SCRIPT
 -- =====================================================
 
 local Players = game:GetService("Players")
@@ -12,25 +12,25 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Авто-очистка старых UI элементов при перезапусках, чтобы не двоилось
+-- Чистка старых элементов UI
 for _, oldGui in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
     if oldGui.Name == "NeverlosePrisonBase" then oldGui:Destroy() end
 end
 
 -- ================= GLOBAL CONFIGURATION =================
 local Settings = {
-    MenuKey = Enum.KeyCode.M,       -- Открытие меню Neverlose
-    AimKey = Enum.KeyCode.Q,        -- Кнопка активации аима
+    MenuKey = Enum.KeyCode.M,       
+    AimKey = Enum.KeyCode.Q,        
     AimEnabled = true,
-    FovRadius = 160,
-    Smoothing = 0.15,
+    FovRadius = 150,                -- Оптимальный радиус для Solara
+    Smoothing = 0.20,               -- Чуть увеличили плавность, чтобы камеру не трясло
     TargetPart = "Head",
+    MaxTracers = 20,                -- Жесткий лимит линий для защиты от лагов
     
-    -- Двухцветные премиум-трейсеры фракций
     Colors = {
-        Guards = Color3.fromRGB(0, 100, 255),     -- Сине-черный
-        Inmates = Color3.fromRGB(255, 120, 0),    -- Оранжево-черный
-        Criminals = Color3.fromRGB(255, 0, 50)    -- Красно-черный
+        Guards = Color3.fromRGB(0, 120, 255),
+        Inmates = Color3.fromRGB(255, 130, 0),
+        Criminals = Color3.fromRGB(255, 10, 50)
     }
 }
 -- =======================================================
@@ -39,12 +39,14 @@ local isMenuOpen = true
 local isAimActive = false
 local isBindingAim = false
 local isBindingMenu = false
+
+local TargetsCache = {} -- Кэш для оптимизации
 local Tracers = {}
 
 -- Создание зоны FOV через Drawing API
 local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 1.5
-FOVCircle.Color = Color3.fromRGB(50, 50, 60)
+FOVCircle.Thickness = 1
+FOVCircle.Color = Color3.fromRGB(80, 80, 90)
 FOVCircle.Filled = false
 FOVCircle.Visible = true
 
@@ -55,83 +57,87 @@ local function removeTracer(player)
     end
 end
 
--- ПРИМЕНЕНИЕ ШЕЙДЕРОВ СТИЛЯ NEVERLOSE (Синий туман + Ночь)
+-- Применение шейдеров (Облегченная версия для Solara)
 local function applyNeverloseShaders()
-    Lighting.FogEnd = 500
-    Lighting.FogStart = 20
-    Lighting.FogColor = Color3.fromRGB(10, 15, 30) -- Темно-синий туман
+    Lighting.FogEnd = 600
+    Lighting.FogStart = 30
+    Lighting.FogColor = Color3.fromRGB(12, 16, 28)
     
-    -- Удаление стандартного неба (Skybox)
     for _, obj in ipairs(Lighting:GetChildren()) do
         if obj:IsA("Sky") then obj:Destroy() end
     end
-    
-    Lighting.ClockTime = 0 -- Ночной режим
+    Lighting.ClockTime = 0 
 end
 applyNeverloseShaders()
 
--- УМНЫЙ ВЫБОР ЦЕЛЕЙ ДЛЯ PRISON LIFE
-local function isValidTarget(player)
+-- Оптимизированная проверка целей
+local function checkPlayerStatus(player)
     if not player or not player.Parent or not player.Character then return false end
     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then return false end
     
     local myTeam = LocalPlayer.Team and LocalPlayer.Team.Name or ""
     local targetTeam = player.Team and player.Team.Name or ""
+    if myTeam == targetTeam then return false end -- Своих не трогаем
     
-    -- Логика, если мы играем за ОХРАНУ (Guards)
     if myTeam == "Guards" then
         if targetTeam == "Criminals" then
             return true
         elseif targetTeam == "Inmates" then
-            -- Если заключенный взял в руки оружие/предмет
             if player.Character:FindFirstChildOfClass("Tool") then 
                 return true 
             end
-            
-            -- Если заключенный сбежал из зоны камер (Упрощенная проверка координат)
             local root = player.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local pos = root.Position
+                -- Проверка выхода из зоны камер
                 if pos.X > 600 or pos.X < 50 or pos.Z > 2400 or pos.Z < 2200 then
                     return true 
                 end
             end
         end
-        
-    -- Логика, если мы играем за Преступников (Criminals) или Заключенных (Inmates)
     else
-        if targetTeam == "Guards" then
-            return true
-        end
+        if targetTeam == "Guards" then return true end
     end
-    
     return false
 end
 
--- ПОИСК БЛИЖАЙШЕГО ИГРОКА В FOV
+-- ОТДЕЛЬНЫЙ ПОТОК: Расчет целей 10 раз в секунду вместо 60 (Убирает лаги!)
+task.spawn(function()
+    while true do
+        local tempCache = {}
+        local allPlayers = Players:GetPlayers()
+        
+        for i = 1, #allPlayers do
+            local p = allPlayers[i]
+            if p ~= LocalPlayer and checkPlayerStatus(p) then
+                table.insert(tempCache, p)
+            else
+                removeTracer(p)
+            end
+        end
+        TargetsCache = tempCache
+        task.wait(0.1)
+    end
+end)
+
+-- Быстрый поиск ближайшего игрока из кэша
 local function getClosestPlayerInFov()
     local closestTarget = nil
     local shortestDistance = math.huge
 
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        return nil
-    end
+    for i = 1, #TargetsCache do
+        local player = TargetsCache[i]
+        if player and player.Character and player.Character:FindFirstChild(Settings.TargetPart) then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character[Settings.TargetPart].Position)
+            if onScreen then
+                local mousePosition = Vector2.new(Mouse.X, Mouse.Y)
+                local targetScreenPosition = Vector2.new(screenPos.X, screenPos.Y)
+                local fovDistance = (mousePosition - targetScreenPosition).Magnitude
 
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and isValidTarget(player) then
-            if player.Character:FindFirstChild(Settings.TargetPart) then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character[Settings.TargetPart].Position)
-                
-                if onScreen then
-                    local mousePosition = Vector2.new(Mouse.X, Mouse.Y)
-                    local targetScreenPosition = Vector2.new(screenPos.X, screenPos.Y)
-                    local fovDistance = (mousePosition - targetScreenPosition).Magnitude
-
-                    if fovDistance < Settings.FovRadius and fovDistance < shortestDistance then
-                        shortestDistance = fovDistance
-                        closestTarget = player
-                    end
+                if fovDistance < Settings.FovRadius and fovDistance < shortestDistance then
+                    shortestDistance = fovDistance
+                    closestTarget = player
                 end
             end
         end
@@ -163,7 +169,6 @@ UIStroke.Color = Color3.fromRGB(30, 32, 45)
 UIStroke.Thickness = 1.2
 UIStroke.Parent = MainFrame
 
--- Боковая панель
 local Sidebar = Instance.new("Frame")
 Sidebar.Size = UDim2.new(0, 130, 1, 0)
 Sidebar.BackgroundColor3 = Color3.fromRGB(7, 8, 12)
@@ -189,7 +194,6 @@ ContentFrame.Position = UDim2.new(0, 140, 0, 10)
 ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
--- Плитка настроек
 local AimGrid = Instance.new("Frame")
 AimGrid.Size = UDim2.new(0, 360, 0, 140)
 AimGrid.BackgroundColor3 = Color3.fromRGB(15, 16, 24)
@@ -214,7 +218,6 @@ AimTitle.TextSize = 11
 AimTitle.TextXAlignment = Enum.TextXAlignment.Left
 AimTitle.Parent = AimGrid
 
--- Кнопки биндов в меню
 local BindMenuBtn = Instance.new("TextButton")
 BindMenuBtn.Size = UDim2.new(0, 160, 0, 28)
 BindMenuBtn.Position = UDim2.new(0, 10, 0, 40)
@@ -254,15 +257,12 @@ local BtnCorner2 = Instance.new("UICorner")
 BtnCorner2.CornerRadius = UDim.new(0, 4)
 BtnCorner2.Parent = BindMenuKeyBtn
 
--- ПЛАВНАЯ TWEEN АНИМАЦИЯ ОТКРЫТИЯ/ЗАКРЫТИЯ
 local function toggleMenu(open)
     isMenuOpen = open
     local targetSize = open and UDim2.new(0, 520, 0, 340) or UDim2.new(0, 520, 0, 0)
-    
     local tweenSize = TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = targetSize})
     tweenSize:Play()
     MainFrame.Visible = true
-    
     if not open then
         task.wait(0.2)
         if not isMenuOpen then MainFrame.Visible = false end
@@ -290,6 +290,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 
     if isBindingMenu and input.UserInputType == Enum.UserInputType.Keyboard then
+    if isBindingMenu and input.UserInputType == Enum.UserInputType.Keyboard then
         Settings.MenuKey = input.KeyCode
         BindMenuKeyBtn.Text = "Menu Key: " .. Settings.MenuKey.Name
         isBindingMenu = false
@@ -300,7 +301,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
         toggleMenu(not isMenuOpen)
     end
 
-    -- Переключатель аимбота на кнопку Q
     if Settings.AimEnabled and input.KeyCode == Settings.AimKey then
         isAimActive = not isAimActive
         if isAimActive then
@@ -313,10 +313,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- ГЛАВНЫЙ СИНХРОННЫЙ ЦИКЛ ОБНОВЛЕНИЯ И ОТРИСОВКИ ТРЕЙСЕРОВ
+-- ГЛАВНЫЙ ОПТИМИЗИРОВАННЫЙ ЦИКЛ (КАЖДЫЙ КАДР)
 RunService.RenderStepped:Connect(function()
     FOVCircle.Position = Vector2.new(Mouse.X, Mouse.Y)
-    FOVCircle.Radius = Settings.FovRadius
 
     if isAimActive and Settings.AimEnabled then
         local target = getClosestPlayerInFov()
@@ -327,41 +326,37 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- ЧИСТЫЙ И ОПТИМИЗИРОВАННЫЙ БЛОК ТРЕЙСЕРОВ
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    -- Отрисовка трейсеров строго из подготовленного кэша целей
+    local renderedLines = 0
+    for i = 1, #TargetsCache do
+        local player = TargetsCache[i]
+        if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and renderedLines < Settings.MaxTracers then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
             
-            if humanoid and humanoid.Health > 0 and player.Team then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
-                
-                if onScreen then
-                    if not Tracers[player] then
-                        local line = Drawing.new("Line")
-                        line.Thickness = 1.8
-                        line.Transparency = 0.95
-                        Tracers[player] = line
-                    end
-                    
-                    local line = Tracers[player]
-                    line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    line.To = Vector2.new(screenPos.X, screenPos.Y)
-                    
-                    -- Двухцветная палитра Neverlose для фракций
-                    local tName = player.Team.Name
-                    if tName == "Guards" then
-                        line.Color = Settings.Colors.Guards
-                    elseif tName == "Inmates" then
-                        line.Color = Settings.Colors.Inmates
-                    elseif tName == "Criminals" then
-                        line.Color = Settings.Colors.Criminals
-                    else
-                        line.Color = Color3.fromRGB(200, 200, 200)
-                    end
-                    line.Visible = true
-                else
-                    removeTracer(player)
+            if onScreen then
+                renderedLines = renderedLines + 1
+                if not Tracers[player] then
+                    local line = Drawing.new("Line")
+                    line.Thickness = 1.5
+                    line.Transparency = 0.8
+                    Tracers[player] = line
                 end
+                
+                local line = Tracers[player]
+                line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                line.To = Vector2.new(screenPos.X, screenPos.Y)
+                
+                local tName = player.Team and player.Team.Name or ""
+                if tName == "Guards" then
+                    line.Color = Settings.Colors.Guards
+                elseif tName == "Inmates" then
+                    line.Color = Settings.Colors.Inmates
+                elseif tName == "Criminals" then
+                    line.Color = Settings.Colors.Criminals
+                else
+                    line.Color = Color3.fromRGB(150, 150, 150)
+                end
+                line.Visible = true
             else
                 removeTracer(player)
             end
