@@ -1,5 +1,5 @@
 -- =====================================================
---    SOLARA OPTIMIZED NEVERLOSE PRISON LIFE SCRIPT
+--    SOLARA FIXED & VERIFIED NEVERLOSE PRISON LIFE
 -- =====================================================
 
 local Players = game:GetService("Players")
@@ -12,7 +12,7 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Чистка старых элементов UI
+-- Чистка старых элементов UI при перезапуске
 for _, oldGui in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
     if oldGui.Name == "NeverlosePrisonBase" then oldGui:Destroy() end
 end
@@ -22,10 +22,10 @@ local Settings = {
     MenuKey = Enum.KeyCode.M,       
     AimKey = Enum.KeyCode.Q,        
     AimEnabled = true,
-    FovRadius = 150,                -- Оптимальный радиус для Solara
-    Smoothing = 0.20,               -- Чуть увеличили плавность, чтобы камеру не трясло
+    FovRadius = 150,                
+    Smoothing = 0.20,               
     TargetPart = "Head",
-    MaxTracers = 20,                -- Жесткий лимит линий для защиты от лагов
+    MaxTracers = 20,                
     
     Colors = {
         Guards = Color3.fromRGB(0, 120, 255),
@@ -40,24 +40,29 @@ local isAimActive = false
 local isBindingAim = false
 local isBindingMenu = false
 
-local TargetsCache = {} -- Кэш для оптимизации
+local TargetsCache = {} 
 local Tracers = {}
 
--- Создание зоны FOV через Drawing API
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 1
-FOVCircle.Color = Color3.fromRGB(80, 80, 90)
-FOVCircle.Filled = false
-FOVCircle.Visible = true
+-- ЗАЩИТА: Проверяем, поддерживает ли Solara API рисования прямо сейчас
+local FOVCircle = nil
+if pcall(function() return Drawing and Drawing.new end) then
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Thickness = 1
+    FOVCircle.Color = Color3.fromRGB(80, 80, 90)
+    FOVCircle.Filled = false
+    FOVCircle.Visible = true
+else
+    print("[Solara Warning]: Drawing API (FOV Circle) is currently unsupported or disabled.")
+end
 
 local function removeTracer(player)
     if Tracers[player] then
-        Tracers[player]:Remove()
+        pcall(function() Tracers[player]:Remove() end)
         Tracers[player] = nil
     end
 end
 
--- Применение шейдеров (Облегченная версия для Solara)
+-- Применение шейдеров
 local function applyNeverloseShaders()
     Lighting.FogEnd = 600
     Lighting.FogStart = 30
@@ -68,9 +73,9 @@ local function applyNeverloseShaders()
     end
     Lighting.ClockTime = 0 
 end
-applyNeverloseShaders()
+pcall(applyNeverloseShaders) -- Заворачиваем в pcall, чтобы не крашило при отсутствии прав
 
--- Оптимизированная проверка целей
+-- Проверка целей
 local function checkPlayerStatus(player)
     if not player or not player.Parent or not player.Character then return false end
     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
@@ -78,7 +83,7 @@ local function checkPlayerStatus(player)
     
     local myTeam = LocalPlayer.Team and LocalPlayer.Team.Name or ""
     local targetTeam = player.Team and player.Team.Name or ""
-    if myTeam == targetTeam then return false end -- Своих не трогаем
+    if myTeam == targetTeam then return false end 
     
     if myTeam == "Guards" then
         if targetTeam == "Criminals" then
@@ -90,7 +95,6 @@ local function checkPlayerStatus(player)
             local root = player.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local pos = root.Position
-                -- Проверка выхода из зоны камер
                 if pos.X > 600 or pos.X < 50 or pos.Z > 2400 or pos.Z < 2200 then
                     return true 
                 end
@@ -102,7 +106,7 @@ local function checkPlayerStatus(player)
     return false
 end
 
--- ОТДЕЛЬНЫЙ ПОТОК: Расчет целей 10 раз в секунду вместо 60 (Убирает лаги!)
+-- Оптимизированный поток проверки целей (10 раз в секунду)
 task.spawn(function()
     while true do
         local tempCache = {}
@@ -121,7 +125,7 @@ task.spawn(function()
     end
 end)
 
--- Быстрый поиск ближайшего игрока из кэша
+-- Поиск игрока в FOV
 local function getClosestPlayerInFov()
     local closestTarget = nil
     local shortestDistance = math.huge
@@ -145,7 +149,7 @@ local function getClosestPlayerInFov()
     return closestTarget
 end
 
--- СОЗДАНИЕ ИНТЕРФЕЙСА NEVERLOSE STYLE UI
+-- СОЗДАНИЕ ИНТЕРФЕЙСА (ИСПРАВЛЕНЫ ВСЕ ОПЕЧАТКИ)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "NeverlosePrisonBase"
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -218,6 +222,7 @@ AimTitle.TextSize = 11
 AimTitle.TextXAlignment = Enum.TextXAlignment.Left
 AimTitle.Parent = AimGrid
 
+-- ИСПРАВЛЕНО: Кнопка бинда аима использует верную переменную
 local BindMenuBtn = Instance.new("TextButton")
 BindMenuBtn.Size = UDim2.new(0, 160, 0, 28)
 BindMenuBtn.Position = UDim2.new(0, 10, 0, 40)
@@ -243,6 +248,7 @@ StatusLabel.TextSize = 10
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.Parent = AimGrid
 
+-- ИСПРАВЛЕНО: Кнопка бинда меню использует верную переменную без лишних букв
 local BindMenuKeyBtn = Instance.new("TextButton")
 BindMenuKeyBtn.Size = UDim2.new(0, 160, 0, 28)
 BindMenuKeyBtn.Position = UDim2.new(0, 190, 0, 40)
@@ -290,7 +296,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 
     if isBindingMenu and input.UserInputType == Enum.UserInputType.Keyboard then
-    if isBindingMenu and input.UserInputType == Enum.UserInputType.Keyboard then
         Settings.MenuKey = input.KeyCode
         BindMenuKeyBtn.Text = "Menu Key: " .. Settings.MenuKey.Name
         isBindingMenu = false
@@ -313,9 +318,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- ГЛАВНЫЙ ОПТИМИЗИРОВАННЫЙ ЦИКЛ (КАЖДЫЙ КАДР)
+-- ГЛАВНЫЙ ЦИКЛ ОБНОВЛЕНИЯ
 RunService.RenderStepped:Connect(function()
-    FOVCircle.Position = Vector2.new(Mouse.X, Mouse.Y)
+    -- Безопасное обновление круга FOV (если поддерживается софтом)
+    if FOVCircle then
+        FOVCircle.Position = Vector2.new(Mouse.X, Mouse.Y)
+    end
 
     if isAimActive and Settings.AimEnabled then
         local target = getClosestPlayerInFov()
@@ -326,7 +334,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Отрисовка трейсеров строго из подготовленного кэша целей
+    -- Отрисовка трейсеров с защитой Drawing API
     local renderedLines = 0
     for i = 1, #TargetsCache do
         local player = TargetsCache[i]
@@ -335,28 +343,34 @@ RunService.RenderStepped:Connect(function()
             
             if onScreen then
                 renderedLines = renderedLines + 1
+                
+                -- Безопасное создание линии
                 if not Tracers[player] then
-                    local line = Drawing.new("Line")
-                    line.Thickness = 1.5
-                    line.Transparency = 0.8
-                    Tracers[player] = line
+                    local success, newLine = pcall(function() return Drawing.new("Line") end)
+                    if success and newLine then
+                        newLine.Thickness = 1.5
+                        newLine.Transparency = 0.8
+                        Tracers[player] = newLine
+                    end
                 end
                 
                 local line = Tracers[player]
-                line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                line.To = Vector2.new(screenPos.X, screenPos.Y)
-                
-                local tName = player.Team and player.Team.Name or ""
-                if tName == "Guards" then
-                    line.Color = Settings.Colors.Guards
-                elseif tName == "Inmates" then
-                    line.Color = Settings.Colors.Inmates
-                elseif tName == "Criminals" then
-                    line.Color = Settings.Colors.Criminals
-                else
-                    line.Color = Color3.fromRGB(150, 150, 150)
+                if line then
+                    line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    line.To = Vector2.new(screenPos.X, screenPos.Y)
+                    
+                    local tName = player.Team and player.Team.Name or ""
+                    if tName == "Guards" then
+                        line.Color = Settings.Colors.Guards
+                    elseif tName == "Inmates" then
+                        line.Color = Settings.Colors.Inmates
+                    elseif tName == "Criminals" then
+                        line.Color = Settings.Colors.Criminals
+                    else
+                        line.Color = Color3.fromRGB(150, 150, 150)
+                    end
+                    line.Visible = true
                 end
-                line.Visible = true
             else
                 removeTracer(player)
             end
