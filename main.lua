@@ -1,7 +1,3 @@
--- =====================================================
---    SOLARA FIXED & VERIFIED NEVERLOSE PRISON LIFE
--- =====================================================
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -12,12 +8,10 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Чистка старых элементов UI при перезапуске
 for _, oldGui in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
     if oldGui.Name == "NeverlosePrisonBase" then oldGui:Destroy() end
 end
 
--- ================= GLOBAL CONFIGURATION =================
 local Settings = {
     MenuKey = Enum.KeyCode.M,       
     AimKey = Enum.KeyCode.Q,        
@@ -33,7 +27,6 @@ local Settings = {
         Criminals = Color3.fromRGB(255, 10, 50)
     }
 }
--- =======================================================
 
 local isMenuOpen = true
 local isAimActive = false
@@ -43,26 +36,39 @@ local isBindingMenu = false
 local TargetsCache = {} 
 local Tracers = {}
 
--- ЗАЩИТА: Проверяем, поддерживает ли Solara API рисования прямо сейчас
-local FOVCircle = nil
-if pcall(function() return Drawing and Drawing.new end) then
-    FOVCircle = Drawing.new("Circle")
-    FOVCircle.Thickness = 1
-    FOVCircle.Color = Color3.fromRGB(80, 80, 90)
-    FOVCircle.Filled = false
-    FOVCircle.Visible = true
-else
-    print("[Solara Warning]: Drawing API (FOV Circle) is currently unsupported or disabled.")
+local function createBeamTracer(player, targetPart)
+    if Tracers[player] then return end
+    
+    local beam = Instance.new("Beam")
+    local attachment0 = Instance.new("Attachment")
+    local attachment1 = Instance.new("Attachment")
+    
+    attachment0.Name = "TracerStart"
+    attachment1.Name = "TracerEnd"
+    
+    attachment0.Parent = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or workspace.Terrain
+    attachment1.Parent = targetPart
+    
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Width0 = 0.05
+    beam.Width1 = 0.05
+    beam.FaceCamera = true
+    beam.Transparency = NumberSequence.new(0.2)
+    beam.Parent = workspace.Terrain
+    
+    Tracers[player] = {Beam = beam, A0 = attachment0, A1 = attachment1}
 end
 
 local function removeTracer(player)
     if Tracers[player] then
-        pcall(function() Tracers[player]:Remove() end)
+        if Tracers[player].Beam then Tracers[player].Beam:Destroy() end
+        if Tracers[player].A0 then Tracers[player].A0:Destroy() end
+        if Tracers[player].A1 then Tracers[player].A1:Destroy() end
         Tracers[player] = nil
     end
 end
 
--- Применение шейдеров
 local function applyNeverloseShaders()
     Lighting.FogEnd = 600
     Lighting.FogStart = 30
@@ -73,9 +79,8 @@ local function applyNeverloseShaders()
     end
     Lighting.ClockTime = 0 
 end
-pcall(applyNeverloseShaders) -- Заворачиваем в pcall, чтобы не крашило при отсутствии прав
+pcall(applyNeverloseShaders)
 
--- Проверка целей
 local function checkPlayerStatus(player)
     if not player or not player.Parent or not player.Character then return false end
     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
@@ -106,7 +111,6 @@ local function checkPlayerStatus(player)
     return false
 end
 
--- Оптимизированный поток проверки целей (10 раз в секунду)
 task.spawn(function()
     while true do
         local tempCache = {}
@@ -125,7 +129,6 @@ task.spawn(function()
     end
 end)
 
--- Поиск игрока в FOV
 local function getClosestPlayerInFov()
     local closestTarget = nil
     local shortestDistance = math.huge
@@ -149,7 +152,6 @@ local function getClosestPlayerInFov()
     return closestTarget
 end
 
--- СОЗДАНИЕ ИНТЕРФЕЙСА (ИСПРАВЛЕНЫ ВСЕ ОПЕЧАТКИ)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "NeverlosePrisonBase"
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -222,7 +224,6 @@ AimTitle.TextSize = 11
 AimTitle.TextXAlignment = Enum.TextXAlignment.Left
 AimTitle.Parent = AimGrid
 
--- ИСПРАВЛЕНО: Кнопка бинда аима использует верную переменную
 local BindMenuBtn = Instance.new("TextButton")
 BindMenuBtn.Size = UDim2.new(0, 160, 0, 28)
 BindMenuBtn.Position = UDim2.new(0, 10, 0, 40)
@@ -248,7 +249,6 @@ StatusLabel.TextSize = 10
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.Parent = AimGrid
 
--- ИСПРАВЛЕНО: Кнопка бинда меню использует верную переменную без лишних букв
 local BindMenuKeyBtn = Instance.new("TextButton")
 BindMenuKeyBtn.Size = UDim2.new(0, 160, 0, 28)
 BindMenuKeyBtn.Position = UDim2.new(0, 190, 0, 40)
@@ -318,13 +318,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
--- ГЛАВНЫЙ ЦИКЛ ОБНОВЛЕНИЯ
 RunService.RenderStepped:Connect(function()
-    -- Безопасное обновление круга FOV (если поддерживается софтом)
-    if FOVCircle then
-        FOVCircle.Position = Vector2.new(Mouse.X, Mouse.Y)
-    end
-
     if isAimActive and Settings.AimEnabled then
         local target = getClosestPlayerInFov()
         if target and target.Character and target.Character:FindFirstChild(Settings.TargetPart) then
@@ -334,45 +328,44 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Отрисовка трейсеров с защитой Drawing API
     local renderedLines = 0
     for i = 1, #TargetsCache do
         local player = TargetsCache[i]
         if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and renderedLines < Settings.MaxTracers then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+            local _, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
             
             if onScreen then
                 renderedLines = renderedLines + 1
                 
-                -- Безопасное создание линии
                 if not Tracers[player] then
-                    local success, newLine = pcall(function() return Drawing.new("Line") end)
-                    if success and newLine then
-                        newLine.Thickness = 1.5
-                        newLine.Transparency = 0.8
-                        Tracers[player] = newLine
-                    end
+                    createBeamTracer(player, player.Character.HumanoidRootPart)
                 end
                 
-                local line = Tracers[player]
-                if line then
-                    line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                    line.To = Vector2.new(screenPos.X, screenPos.Y)
+                local data = Tracers[player]
+                if data and data.Beam then
+                    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        data.A0.Parent = LocalPlayer.Character.HumanoidRootPart
+                    else
+                        data.A0.Parent = workspace.Terrain
+                    end
                     
                     local tName = player.Team and player.Team.Name or ""
+                    local chosenColor = Color3.fromRGB(150, 150, 150)
                     if tName == "Guards" then
-                        line.Color = Settings.Colors.Guards
+                        chosenColor = Settings.Colors.Guards
                     elseif tName == "Inmates" then
-                        line.Color = Settings.Colors.Inmates
+                        chosenColor = Settings.Colors.Inmates
                     elseif tName == "Criminals" then
-                        line.Color = Settings.Colors.Criminals
-                    else
-                        line.Color = Color3.fromRGB(150, 150, 150)
+                        chosenColor = Settings.Colors.Criminals
                     end
-                    line.Visible = true
+                    
+                    data.Beam.Color = ColorSequence.new(chosenColor)
+                    data.Beam.Enabled = true
                 end
             else
-                removeTracer(player)
+                if Tracers[player] and Tracers[player].Beam then
+                    Tracers[player].Beam.Enabled = false
+                end
             end
         else
             removeTracer(player)
